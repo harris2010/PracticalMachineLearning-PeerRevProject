@@ -1,0 +1,142 @@
+---
+title: "Machine Learning Approach on Weight Lifting Exercise Dataset to Predict Quality of the Exercise"
+author: "Harris Panakkal"
+date: "January 15, 2017"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## 1. Introduction
+
+With the advent of the personal monitoring devices such as Jawbone Up, Nike FuelBand, and Fitbit people are collecting personal movement data to quantify movements so as to improve their health, to find out patterns in their movement or just for the facination of the technology.These devices are basically accelerometers. This study uses data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which each of the them have performed their excercises. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The data is separated into training and test sets. The training set has 'classe' variable that identifies excercises performed correctly and incorrectly. The training set was used to identify any other variable that can be used to classify data appropriately into the two categories.The predictors generated in the training set was then used to predict the labels for the test set observations that were without any identifying labels.
+This report describes how the model was built, how the cross validation was used, shows expected out of sample error, and reasons for choices made. Finally the prediction model was used to predict 20 different test cases.
+
+
+## 2. Preprocessing the data
+Initially the data was downloaded, read and split into training and validation sets in 70:30 ratio based on classe variable
+
+```{r}
+# Loading and preprocessing the data
+# Initialising the essential R packages 
+library(downloader)
+library(plyr)
+library(knitr)
+library(datasets)
+library(ggplot2)
+library(rmarkdown)
+library(caret)
+# Step 1
+# Download the training data set if not avaliable in default location
+train_Url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+# Download the test data set if not avaliable in default location
+test_Url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+# Train data
+# Check if train data csv has already been downloaded in current location?
+if(!file.exists("pml-training.csv")){
+  download.file(train_Url,destfile="pml-training.csv",mode = "wb")
+  }
+# Test data
+# Check if test data csv has already been downloaded in current location?
+if(!file.exists("pml-testing.csv")){
+  download.file(test_Url,destfile="pml-testing.csv",mode = "wb")
+  }
+# Read the .CSV file in R data structure 
+trainData <- read.csv("pml-training.csv")
+testData <- read.csv("pml-testing.csv")
+```
+
+```{r}
+
+# Split the data in traning and validation point based on classe variable
+set.seed(123)
+inTrain <- createDataPartition(y=trainData$classe, p=0.7, list=FALSE)
+trainData1 <- trainData[inTrain, ]
+trainData2 <- trainData[-inTrain, ]
+```
+
+#Next variables with nearly zero variance, that are almost always NA and variables that don't add much value in making prediction  were removed. Further variables were removed after analysis of trainData1 and trainData2.
+```{r}
+# Removing variables with nearly zero variance
+nzv <- nearZeroVar(trainData1)
+trainData1 <- trainData1[, -nzv]
+trainData2 <- trainData2[, -nzv]
+# Removing variables that are almost always NA
+mostlyNA <- sapply(trainData1, function(x) mean(is.na(x))) > 0.95
+trainData1 <- trainData1[, mostlyNA==F]
+trainData2 <- trainData2[, mostlyNA==F]
+# Removing variables that don't add much value addition to the prediction, the first five variables
+trainData1 <- trainData1[, -(1:5)]
+trainData2 <- trainData2[, -(1:5)]
+```
+## 3. Building a model 
+Random Forest model was used  to see if it would have acceptable performance. For obtaining the optimal tuning parameters for the model firstly model fitting was performed on the preprocessed train Data (trainData1) followed by use of 3-fold cross-validation instruction in the "train" function.
+```{r}
+library(randomForest)
+# Settings to use 3-fold Cross validation to select optimal tuning parameters
+fitControl <- trainControl(method="cv", number=3, verboseIter=F)
+
+# Fitting the  model on trainData1 using Random forest method
+fit <- train(classe~ ., data=trainData1, method="rf", trControl=fitControl)
+# print the final model and see which parameters has been used 
+fit$finalModel
+```
+## 4. Evaluating obtained model and predict label
+Obtained fitted model was used to predict the label "classe" in trainData2 and a confusion matrix was generated to compare the predicted versus the actual labels:
+
+```{r}
+# Fitted model was used to predict label 'classe' in validation set (trainData2)
+preds <- predict(fit, newdata=trainData2)
+
+# Confusion matrix analysis was performed to get estimate of out-of-sample error
+confusionMatrix(trainData2$classe, preds)
+```
+The accuracy is 99.82% and predicted accuracy for the out-of-sample error is 0.28%. So Random Forests alogorithm looks good to predict on the test set.
+
+##5. Fine tuning was performed of the obtained Model on main training and test data
+Most significantly  before predicting on the test set, we have to train the model on the full training set (trainData), in addition to using a model trained on a reduced training set (trainData1), in order to produce the most accurate predictions. Thus model building was repeated on the original data (trainData and testData respectively):
+```{r}
+# Removing variables with nearly zero variance
+nzv <- nearZeroVar(trainData)
+trainData <- trainData[, -nzv]
+testData <- testData[, -nzv]
+
+# Removing variables that are almost always NA
+mostlyNA <- sapply(trainData, function(x) mean(is.na(x))) > 0.95
+trainData <- trainData[, mostlyNA==F]
+testData <- testData[, mostlyNA==F]
+
+# Removing variables that don't add much value addition to the prediction, which are the first five variables
+trainData <- trainData[, -(1:5)]
+testData <- testData[, -(1:5)]
+
+# Re-fitted model using full training set (trainData)
+fitControl <- trainControl(method="cv", number=3, verboseIter=F)
+fit <- train(classe ~ ., data=trainData, method="rf", trControl=fitControl)
+```
+
+## 6. Predictions Made on Test Set 
+In final step fitted model on trainData was used to predict the label for the observations in testData, and predictions were written to individual files:
+
+```{r}
+# Prediction made on test set
+predictTestSet <- predict(fit, newdata=testData)
+
+# Predictions were converted to character vector
+predictTestSet <- as.character(predictTestSet)
+
+# A function coded to write predictions to files
+pml_write_files <- function(x) {
+    n <- length(x)
+    for(i in 1:n) {
+        filename <- paste0("test_case_", i, ".txt")
+        write.table(x[i], file=filename, quote=F, row.names=F, col.names=F)
+    }
+}
+
+# Prediction files created for submission
+pml_write_files(predictTestSet)
+```
+
+
